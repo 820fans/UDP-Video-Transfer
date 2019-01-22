@@ -2,16 +2,18 @@ import socket
 import cv2
 import numpy
 import time
+import sys
  
 def SendVideo():
 	#建立sock连接
 	#address要连接的服务器IP地址和端口号
 	address = ('127.0.0.1', 8002)
+	# address = ('10.18.96.207', 8002)
 	try:
 		#建立socket对象，参数意义见https://blog.csdn.net/rebelqsp/article/details/22109925
 		#socket.AF_INET：服务器之间网络通信 
 		#socket.SOCK_STREAM：流式socket , for TCP
-		sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+		sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 		#开启连接
 		sock.connect(address)
 	except socket.error as msg:

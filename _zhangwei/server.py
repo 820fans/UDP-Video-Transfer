@@ -1,56 +1,94 @@
 import socket
+import time
 import cv2
 import numpy
-import time
-import sys
- 
-def SendVideo():
-	#建立sock连接
-	#address要连接的服务器IP地址和端口号
+
+def ReceiveVideo():
+	#IP地址'0.0.0.0'为等待客户端连接
 	address = ('127.0.0.1', 8002)
-	# address = ('10.18.96.207', 8002)
-	try:
-		#建立socket对象，参数意义见https://blog.csdn.net/rebelqsp/article/details/22109925
-		#socket.AF_INET：服务器之间网络通信 
-		#socket.SOCK_STREAM：流式socket , for TCP
-		sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-		#开启连接
-		sock.connect(address)
-	except socket.error as msg:
-		print(msg)
-		sys.exit(1)
+	#建立socket对象，参数意义见https://blog.csdn.net/rebelqsp/article/details/22109925
+	#socket.AF_INET：服务器之间网络通信 
+	#socket.SOCK_STREAM：流式socket , for UDP
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	#将套接字绑定到地址, 在AF_INET下,以元组（host,port）的形式表示地址.
+	sock.bind(address)
+	#开始监听TCP传入连接。参数指定在拒绝连接之前，操作系统可以挂起的最大连接数量。该值至少为1，大部分应用程序设为5就可以了。
+	# s.listen(1)
  
-	#建立图像读取对象
-	capture = cv2.VideoCapture(0)
-	#读取一帧图像，读取成功:ret=1 frame=读取到的一帧图像；读取失败:ret=0
-	ret, frame = capture.read()
-	#压缩参数，后面cv2.imencode将会用到，对于jpeg来说，15代表图像质量，越高代表图像质量越好为 0-100，默认95
-	encode_param=[int(cv2.IMWRITE_JPEG_QUALITY),15]
- 
-	while ret:
-		#停止0.1S 防止发送过快服务的处理不过来，如果服务端的处理很多，那么应该加大这个值
-		time.sleep(0.01)
-		#cv2.imencode将图片格式转换(编码)成流数据，赋值到内存缓存中;主要用于图像数据格式的压缩，方便网络传输
-		#'.jpg'表示将图片按照jpg格式编码。
-		result, imgencode = cv2.imencode('.jpg', frame, encode_param)
-		#建立矩阵
-		data = numpy.array(imgencode)
-		#将numpy矩阵转换成字符形式，以便在网络中传输
-		stringData = data.tostring()
+	def recvall(count):
+		buf = b''#buf是一个byte类型
+		while count:
+			#接受TCP套接字的数据。数据以字符串形式返回，count指定要接收的最大数据量.
+			newbuf = sock.recv(count)
+			if not newbuf: return None
+			buf += newbuf
+			count -= len(newbuf)
+		return buf
 		
-		#先发送要发送的数据的长度
-		#ljust() 方法返回一个原字符串左对齐,并使用空格填充至指定长度的新字符串
-		sock.send(str.encode(str(len(stringData)).ljust(16)));
-		#发送数据
-		sock.send(stringData);
-		#读取服务器返回值
-		receive = sock.recv(1024)
-		if len(receive):print(str(receive,encoding='utf-8'))
-		#读取下一帧图片
-		ret, frame = capture.read()
-		if cv2.waitKey(10) == 27:
-			break
-	sock.close()
+	#接受TCP连接并返回（conn,address）,其中conn是新的套接字对象，可以用来接收和发送数据。addr是连接客户端的地址。
+	#没有连接则等待有连接
 	
+	# UDP不需要建立连接
+	bfsize = 46080
+	chuncksize = 46082
+	
+	frame1 = numpy.zeros(bfsize*20, dtype=numpy.uint8)
+	cnt = 0
+	flg = 0
+	s = b''
+	while 1:
+		# start = time.time()#用于计算帧率信息
+		cnt += 1
+		data, addr = sock.recvfrom(chuncksize)
+		i = int(data[-2:].decode())
+		line_data = numpy.frombuffer(data[:-2], dtype=numpy.uint8)
+		# print(len(line_data))
+		# print(data[-10:-2])
+		# print(line_data[-10:-2])
+		# continue
+		frame1[i*46080:(i+1)*46080] = line_data
+		if cnt == 20:
+		    # temp_frame = frame1.copy().reshape(480, 640, 3)
+		    print(frame1)
+		    cv2.imshow("frame", frame1.reshape(480, 640, 3))
+		    cnt = 0
+		#print(cnt)
+		
+		
+		# s += data[:-2]
+		# if len(s) == (46080*20):
+		    # frame = numpy.fromstring(s, dtype=numpy.uint8)
+		    # frame = frame.reshape(480, 640,3)
+		    # cv2.imshow("frame",frame)
+
+		    # s = b''
+		  
+		#key = cv2.waitKey(1)
+		if cv2.waitKey(1) & 0xFF == ord('q'):
+			break
+		"""
+		length = recvall(16)#获得图片文件的长度,16代表获取长度
+		stringData = recvall(int(length))#根据获得的文件长度，获取图片文件
+		data = numpy.frombuffer(stringData, numpy.uint8)#将获取到的字符流数据转换成1维数组
+		decimg=cv2.imdecode(data,cv2.IMREAD_COLOR)#将数组解码成图像
+		cv2.imshow('SERVER',decimg)#显示图像
+		
+		#进行下一步处理
+		#。
+		#。
+		#。
+ 
+        #将帧率信息回传，主要目的是测试可以双向通信
+		end = time.time()
+		seconds = end - start
+		fps  = 1/seconds;
+		s.sendto(bytes(str(int(fps)),encoding='utf-8'), address)
+		k = cv2.waitKey(10)&0xff
+		if k == 27:
+			break
+		"""
+	s.close()
+	cv2.destroyAllWindows()
+ 
 if __name__ == '__main__':
-	SendVideo()
+	ReceiveVideo()

@@ -13,8 +13,8 @@ def recv_one_frame(conn):
 
 
 if __name__ == '__main__':
-    h = 48*4
-    w = 64*4
+    h = 480
+    w = 640
     c = 3
     buffersize = h * w * c
     sk = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -23,7 +23,7 @@ if __name__ == '__main__':
     # type: 套接字类型可以根据是面向连接的还是非连接分为SOCK_STREAM或SOCK_DGRAM
     # protocol: 一般不填默认为0.
 
-    host = "192.168.43.43" # 获取本地主机名
+    host = "192.168.43.123" # 获取本地主机名
     port = 12340                # 设置端口
 
     sk.bind((host,port))
