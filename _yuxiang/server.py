@@ -1,8 +1,6 @@
 import socket 
 import cv2 
 import numpy as np 
-# import simplejson
-
 
 def recv_one_frame(conn):
     k = conn.recv(buffersize)
@@ -15,18 +13,18 @@ def recv_one_frame(conn):
 
 
 if __name__ == '__main__':
-    h = 480
-    w = 640
+    h = 48*4
+    w = 64*4
     c = 3
-    buffersize = 3*640*480
+    buffersize = h * w * c
     sk = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     # socket.socket([family[, type[, proto]]])
     # family: 套接字家族可以使AF_UNIX或者AF_INET
     # type: 套接字类型可以根据是面向连接的还是非连接分为SOCK_STREAM或SOCK_DGRAM
     # protocol: 一般不填默认为0.
 
-    host = socket.gethostname() # 获取本地主机名
-    port = 1230                # 设置端口
+    host = "192.168.43.43" # 获取本地主机名
+    port = 12340                # 设置端口
 
     sk.bind((host,port))
     sk.listen(2)
