@@ -3,18 +3,20 @@ import cv2
 import numpy
 import time
 import sys
-from config import Config
  
 def SendVideo():
-	con = Config()
-	host = con.get("server", "host")
-	port = con.get("server", "port")
-	
-	address = (host, int(port))
-	
+	#建立sock连接
+	#address要连接的服务器IP地址和端口号
+	address = ('127.0.0.1', 8002)
 	# address = ('10.18.96.207', 8002)
 	try:
+		#建立socket对象，参数意义见https://blog.csdn.net/rebelqsp/article/details/22109925
+		#socket.AF_INET：服务器之间网络通信 
+		#socket.SOCK_STREAM：流式socket , for TCP
 		sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+		# sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+		#开启连接
+		# sock.connect(address)
 	except socket.error as msg:
 		print(msg)
 		sys.exit(1)
@@ -31,14 +33,29 @@ def SendVideo():
 		time.sleep(0.01)
 		ret, frame = capture.read()
 		
-		s = frame.flatten().tostring()
+		d = frame.flatten()
+		s = d.tostring()
+		# sock.sendto(s, address)
 		for i in range(20):
+		    # print(len(s[i*46080:(i+1)*46080]))
+		    # print(len(str.encode(str(i).zfill(2))))
+		    # print(s[i*46080:(i+1)*46080])
+		    # print(str.encode(str(i).zfill(2)))
 		    time.sleep(0.001)
 		    sock.sendto(s[i*46080:(i+1)*46080]+str.encode(str(i).zfill(2)), address)
 
 		# result, imgencode = cv2.imencode('.jpg', frame, encode_param)
 		# data = numpy.array(imgencode)
 		# stringData = data.tostring()
+		
+		# 先发送要发送的数据的长度
+		# ljust() 方法返回一个原字符串左对齐,并使用空格填充至指定长度的新字符串
+		# sock.sendto(str.encode(str(len(stringData)).ljust(16)), address)
+		# 发送数据
+		# sock.sendto(stringData, address);
+		# 分片发送数据
+		
+		
 		
 		# save data
 		# cv2.imwrite('read video data.jpg', frame, encode_param)
