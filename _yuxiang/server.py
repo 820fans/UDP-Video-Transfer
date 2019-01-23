@@ -10,7 +10,7 @@ sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 host = '192.168.43.43'
 port = 12340
 server_address = (host, port)
-client_address = (host, port)
+client_address = ('192.168.43.6', port)
 buffersize = 65507
 
 

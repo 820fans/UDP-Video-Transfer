@@ -6,11 +6,11 @@ import sys
 import time
 
 
-jpeg_quality = 88
+jpeg_quality = 60
 host = '192.168.43.43'
 port = 12340
 server_address = (host, port)
-client_address = (host, port)
+client_address = ('192.168.43.6', port)
 buffersize = 65507
 
 
