@@ -5,30 +5,31 @@ import cv2
 import numpy
 import time
 import sys
+from fps import FPS
 from config import Config
+import logging
 
-class FileVideoStream:
+logging.basicConfig(level=logging.DEBUG, 
+                    filename='output.log',
+					format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class WebVideoStream:
 	
-	def __init__(self, transform=None, queue_size=128):
+	def __init__(self, src=0):
 		self.config =  Config()
 		# initialize the file video stream along with the boolean
 		# used to indicate if the thread should be stopped or not
-		self.stream = cv2.VideoCapture(0)
+		self.stream = cv2.VideoCapture(src)
 		self.stream.set(cv2.CAP_PROP_MODE, cv2.CAP_MODE_YUYV)
 		self.stopped = False
-		self.transform = transform
-
-		# initialize the queue used to store frames read from
-		# the video file
-		self.Q = Queue(maxsize=queue_size)
-		# intialize thread
-		self.thread = Thread(target=self.update, args=())
-		self.thread.daemon = True
 
 		self.address = None
 		self.sock = None
 		self.init_connection()
 
+		self.frame = None
 		self.frame_size = 0
 		self.piece_size = 0
 		self.frame_pieces = 0
@@ -36,6 +37,10 @@ class FileVideoStream:
 		
 		#压缩参数，后面cv2.imencode将会用到，对于jpeg来说，15代表图像质量，越高代表图像质量越好为 0-100，默认95
 		encode_param=[int(cv2.IMWRITE_JPEG_QUALITY), 50]
+		
+		# intialize thread
+		self.thread = Thread(target=self.update, args=())
+		self.thread.daemon = True
 
 	def init_config(self):
 		# 初始化大小信息
@@ -44,7 +49,7 @@ class FileVideoStream:
 		w = int(config.get("camera", "w"))
 		h = int(config.get("camera", "h"))
 		d = int(config.get("camera", "d"))
-		frame_pieces = int(config.get("camera", "pieces"))
+		self.frame_pieces = frame_pieces = int(config.get("camera", "pieces"))
 		self.frame_size = w*h
 		self.piece_size = w*h*d/frame_pieces
 
@@ -56,6 +61,13 @@ class FileVideoStream:
 		# 初始化delay信息
 		self.frame_delay = float(config.get("delay", "frame"))
 		self.piece_delay = float(config.get("delay", "piece"))
+
+		# 初始化打包头信息
+		self.head_name = config.get("header", "name")
+		self.head_data_len_len = int(config.get("header", "data"))
+		self.head_index_len = int(config.get("header", "index"))
+		self.head_time_len = int(config.get("header", "time"))
+		
 
 	def init_connection(self):
 		try:
@@ -72,63 +84,6 @@ class FileVideoStream:
 		self.thread.start()
 		return self
 
-	def update(self):
-		sock = self.sock
-		address = self.address
-
-		print("read1 camera")
-		# keep looping infinitely
-		while True:
-			# if the thread indicator variable is set, stop the
-			# thread
-			print("hre")
-			if self.stopped:
-				break
-
-			# otherwise, ensure the queue has room in it
-			if not self.Q.full():
-				print("read camera")
-				# read the next frame from the stream
-				try:
-					(ret, frame) = self.stream.read()
-				except:
-					print("oh no")
-					exit(404)
-
-				if cv2.waitKey(1) & 0xFF == ord('q'):
-					self.stopped = True
-				
-				# if there are transforms to be done, might as well
-				# do them on producer thread before handing back to
-				# consumer thread. ie. Usually the producer is so far
-				# ahead of consumer that we have time to spare.
-				#
-				# Python is not parallel but the transform operations
-				# are usually OpenCV native so release the GIL.
-				#
-				# Really just trying to avoid spinning up additional
-				# native threads and overheads of additional
-				# producer/consumer queues since this one was generally
-				# idle grabbing frames.
-				if self.transform:
-					frame = self.transform(frame)
-
-				# time.sleep(frame_delay)
-				# add the frame to the queue
-				frame_s = frame.flatten().tostring()
-
-				time.sleep(self.frame_delay)
-				for i in range(self.frame_pieces):
-					time.sleep(self.piece_delay)
-					print(self.piece_size)
-					# frame_piece = s[i*46080:(i+1)*46080]+str.encode(str(i).zfill(2))
-					# sock.sendto(frame_piece, address)
-					# self.Q.put(frame)
-			else:
-				time.sleep(0.1)  # Rest for 10ms, we have a full queue
-		
-		self.stop()
-
 	def slice_data(self, index, frame):
 		pass
 
@@ -137,70 +92,50 @@ class FileVideoStream:
 		Pack data over udp
 		"""
 		res = b''
-		config = self.config
-
-		name = config.get("header", "name")
-		data_len_len = int(config.get("header", "data"))
-		index_len = int(config.get("header", "index"))
-		time_len = int(config.get("header", "time"))
-		
-		res += name.encode()
-		res += data_len.to_bytes(data_len_len, byteorder="big")
-		res += index.to_bytes(index_len, byteorder="big")
-		res += create_time.to_bytes(time_len, byteorder="big")
+		res += self.head_name.encode()
+		res += data_len.to_bytes(self.head_data_len_len, byteorder="big")
+		res += index.to_bytes(self.head_index_len, byteorder="big")
+		res += create_time.to_bytes(self.head_time_len, byteorder="big")
 
 		res += data
-
 		return res
 
+	def update(self):
+		# keep looping infinitely until the thread is stopped
+		while True:
+			# if the thread indicator variable is set, stop the thread
+			if self.stopped:
+				return
+
+			# otherwise, read the next frame from the stream
+			(self.grabbed, self.frame_raw) = self.stream.read()
+			
+			frame_s = self.frame_raw.flatten().tostring()
+
+			for i in range(self.frame_pieces):
+				time.sleep(0.001)
+				self.frame = frame_s[i*46080:(i+1)*46080]+i.to_bytes(1, byteorder='big')
+
 	def read(self):
-		# return next frame in the queue
-		return self.Q.get()
-
-	def running(self):
-		return self.more() or not self.stopped
-
-	def more(self):
-		# return True if there are still frames in the queue. If stream is not stopped, try to wait a moment
-		tries = 0
-		while self.Q.qsize() == 0 and not self.stopped and tries < 5:
+		# return the frame most recently read
+		if not self.frame:
 			time.sleep(0.1)
-			tries += 1
-
-		return self.Q.qsize() > 0
+		return self.frame
 
 	def stop(self):
-		cv2.destroyAllWindows()
-		self.stream.release()
-		self.close_connection()
 		# indicate that the thread should be stopped
 		self.stopped = True
-		# wait until stream resources are released (producer thread might be still grabbing frame)
-		self.thread.join()
 
 def SendVideo():
-	# con = Config()
-	# host = con.get("server", "host")
-	# port = con.get("server", "port")
-	
-	# address = (host, int(port))
-	
-	# # address = ('10.18.96.207', 8002)
-	# try:
-	# 	sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-	# except socket.error as msg:
-	# 	print(msg)
-	# 	sys.exit(1)
-		
-	
-	FileVideoStream().start()
+	wvs = WebVideoStream().start()
+	# fps = FPS().start()
+	sock = wvs.sock
+	address = wvs.address
 
-	# capture = cv2.VideoCapture(0)
-	# capture.set(cv2.CAP_PROP_MODE, cv2.CAP_MODE_YUYV)
-	# #读取一帧图像，读取成功:ret=1 frame=读取到的一帧图像；读取失败:ret=0
-	# ret, frame = capture.read()
-	# encode_param=[int(cv2.IMWRITE_JPEG_QUALITY), 50]
-	
+	while True:
+		frame = wvs.read()
+		if frame:
+			sock.sendto(frame, wvs.address)
 
 	while False:
 		#停止0.1S 防止发送过快服务的处理不过来，如果服务端的处理很多，那么应该加大这个值

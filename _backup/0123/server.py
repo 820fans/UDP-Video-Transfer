@@ -1,5 +1,3 @@
-from threading import Thread
-from queue import Queue
 import socket
 import time
 import cv2
@@ -7,17 +5,16 @@ import numpy
 from config import Config
 
 
-
 class NetVideoStream:
-	def __init__(self, queue_size=12800):
-		self.config =  Config()
+	def __init__(self, path, queue_size=128):
+		# initialize the file video stream along with the boolean
+		# used to indicate if the thread should be stopped or not
+		self.stream = cv2.VideoCapture(path)
 		self.stopped = False
 
 		# initialize the queue used to store frames read from
 		# the video file
 		self.Q = Queue(maxsize=queue_size)
-		self.init_config()
-
 		# intialize thread
 		self.thread = Thread(target=self.update, args=())
 		self.thread.daemon = True
@@ -31,8 +28,8 @@ class NetVideoStream:
 		d = int(config.get("camera", "d"))
 		self.frame_pieces = frame_pieces = int(config.get("camera", "pieces"))
 		self.frame_size = w*h
-		self.piece_size = int(w*h*d/self.frame_pieces)
-		self.chuncksize = self.piece_size+1
+		self.piece_size = w*h*d/frame_pieces
+		self.chuncksize = piece_size+1
 
 		# 初始化连接信息
 		host = config.get("server", "host")
@@ -48,7 +45,7 @@ class NetVideoStream:
 	def init_connection(self):
 		try:
 			self.sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-			self.sock.bind(self.address)
+			self.sock.bind(address)
 		except socket.error as msg:
 			print(msg)
 			sys.exit(1)
@@ -62,29 +59,32 @@ class NetVideoStream:
 		return self
 
 	def update(self):
-		self.init_connection()
-		sock = self.sock
 		# keep looping infinitely
 		while True:
-			if self.stopped: break
+			# if the thread indicator variable is set, stop the
+			# thread
+			if self.stopped:
+				break
+
 			# otherwise, ensure the queue has room in it
 			if not self.Q.full():
-				data, addr = sock.recvfrom(self.chuncksize)
-				i = int.from_bytes(data[-1:], byteorder='big')
-				line_data = numpy.frombuffer(data[:-1], dtype=numpy.uint8)
+				# read the next frame from the file
+				(grabbed, frame) = self.stream.read()
+
 				# add the frame to the queue
-				self.Q.put({
-					'idx': i,
-					'frame': line_data
-				})
+				self.Q.put(frame)
 			else:
 				time.sleep(0.1)  # Rest for 10ms, we have a full queue
 
 		self.stream.release()
 
 	def read(self):
+		# return next frame in the queue
 		return self.Q.get()
 
+	# Insufficient to have consumer use while(more()) which does
+	# not take into account if the producer has reached end of
+	# file stream.
 	def running(self):
 		return self.more() or not self.stopped
 
@@ -105,7 +105,6 @@ class NetVideoStream:
 
 
 def ReceiveVideo():
-
 	con = Config()
 	host = con.get("server", "host")
 	port = con.get("server", "port")
@@ -116,32 +115,13 @@ def ReceiveVideo():
 	sock.bind(address)
 
 	# UDP不需要建立连接
-	# bfsize = 46080
-	
-	# frame = numpy.zeros(bfsize*20, dtype=numpy.uint8)
-	# nvs = NetVideoStream().start()
-	# cnt = 0
-	# while True:
-	# 	cnt += 1
-	# 	pack = nvs.read()
-	# 	i = pack['idx']
-	# 	data = pack['frame']
-	# 	frame[i*46080:(i+1)*46080] = data
-	# 	print(cnt)
-	# 	if cnt == 20:
-	# 	    cv2.imshow("FireStreamer", frame.reshape(480, 640, 3))
-	# 	    cnt = 0
-
-	# 	if cv2.waitKey(1) & 0xFF == ord('q'):
-	# 		break
-
 	bfsize = 46080
 	chuncksize = 46081
 	
 	frame = numpy.zeros(bfsize*20, dtype=numpy.uint8)
 	cnt = 0
 	s = b''
-	while True:
+	while 1:
 		# start = time.time()#用于计算帧率信息
 		cnt += 1
 		data, addr = sock.recvfrom(chuncksize)
@@ -151,6 +131,16 @@ def ReceiveVideo():
 		if cnt == 20:
 		    cv2.imshow("frame", frame.reshape(480, 640, 3))
 		    cnt = 0
+		#print(cnt)
+		
+		
+		# s += data[:-2]
+		# if len(s) == (46080*20):
+		    # frame = numpy.fromstring(s, dtype=numpy.uint8)
+		    # frame = frame.reshape(480, 640,3)
+		    # cv2.imshow("frame",frame)
+
+		    # s = b''
 		  
 		#key = cv2.waitKey(1)
 		if cv2.waitKey(1) & 0xFF == ord('q'):
