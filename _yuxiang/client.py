@@ -1,38 +1,105 @@
-import socket 
-import cv2 
-import numpy as np
+import socket
+import cv2
+import sys
+from threading import Thread, Lock
+import sys
 import time
 
-h = 480
-w = 640
-c = 3
 
-def send_one_frame(sk):
-    ret, frame = cap.read()
-    sk.send(frame.tobytes())
-    # time.sleep(0.1)
+jpeg_quality = 60
+host = '192.168.43.43'
+port = 12340
+server_address = (host, port)
+client_address = ('192.168.43.6', port)
+buffersize = 65507
+
+
+class VideoGrabber(Thread):
+    """ A threaded video grabber
+
+    Attributes:
+        encode_params (): 
+        cap (str): 
+        attr2 (:obj:`int`, optional): Description of `attr2`.
+        
+    """
+    def __init__(self, jpeg_quality):
+        """Constructor.
+        Args:
+        jpeg_quality (:obj:`int`): Quality of JPEG encoding, in 0, 100.
+        
+        """
+        Thread.__init__(self)
+        self.encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+        self.cap = cv2.VideoCapture(0)
+        self.running = True
+        self.buffer = None
+        self.lock = Lock()
+
+    def stop(self):
+        self.running = False 
+    
+    def get_buffer(self):
+        """Method to access the encoded buffer.
+        Returns:
+        np.ndarray: the compressed image if one has been acquired. 
+        None otherwise.
+        """
+        if self.buffer is not None:
+            self.lock.acquire()
+            cpy = self.buffer.copy()            
+            self.lock.release()
+            return cpy # ndarray
+    
+    def run(self):
+        # 一直读取
+        while self.running:
+            success, img = self.cap.read()
+            if not success:
+                continue
+            time.sleep(0.01)
+            # jpeg compression
+            # Protected by a lock
+            # As the main thread may asks to access the buffer
+            self.lock.acquire()
+            result, self.buffer = cv2.imencode('.jpg', img, self.encode_param)
+            # result表示是否成功
+            #print(type(result), type(self.buffer))
+            self.lock.release()
 
 
 if __name__ == '__main__':
-    sk = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    grabber1 = VideoGrabber(jpeg_quality)
+    grabber1.start()
 
-    host = '192.168.43.43' # 获取本地主机名
+    running = True
 
-    port = 12340               # 设置端口号
+    sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    # 主动初始化TCP服务器连接，。一般ad dress的格式为元组（hostname,port），
-    # 如果连接出错，返回socket.error错误。
-    sk.connect((host, port))
-    
-    cap = cv2.VideoCapture(0)
+    print('starting up on %s port %s\n' % server_address)
 
-    count = 10000
+    sk.bind(server_address)
 
-    while count:
-        send_one_frame(sk)
-        count = count - 1
-        if count % 200 == 0 :
-            print("{}帧".format(10000-count))
+    while(running):
+        # address是服务器的地址
+        # print("正在等待服务器申请中...")
+        data, address = sk.recvfrom(4)
+        if(data == b"get"):
+            buffer = grabber1.get_buffer()
+            if buffer is None:
+                continue
+            print(len(buffer))
+            if len(buffer) > 65507:
+                print("The message is too large to be sent within a single UDP datagram. We do not handle splitting the message in multiple datagrams")
+                sk.sendto(b"FAIL",address)
+                continue
+            # We sent the buffer to the server
+            sk.sendto(buffer.tobytes(), address)
+        elif(data == b"quit"):
+            grabber1.stop()
+            running = False #终止循环
 
+    print("Quitting..")
+    grabber1.join()
     sk.close()
-    cap.release()
+
