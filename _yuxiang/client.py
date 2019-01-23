@@ -6,7 +6,7 @@ import sys
 import time
 
 
-jpeg_quality = 60
+jpeg_quality = 70
 host = '192.168.43.43'
 port = 12340
 server_address = (host, port)
@@ -57,7 +57,7 @@ class VideoGrabber(Thread):
             success, img = self.cap.read()
             if not success:
                 continue
-            time.sleep(0.01)
+            time.sleep(0.001)
             # jpeg compression
             # Protected by a lock
             # As the main thread may asks to access the buffer
@@ -78,7 +78,7 @@ if __name__ == '__main__':
 
     print('starting up on %s port %s\n' % server_address)
 
-    sk.bind(server_address)
+    sk.bind(client_address)
 
     while(running):
         # address是服务器的地址
