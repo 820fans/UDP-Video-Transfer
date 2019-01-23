@@ -2,6 +2,7 @@ import socket
 import cv2 
 import numpy as np 
 
+
 def recv_one_frame(conn):
     k = conn.recv(buffersize)
     try:
@@ -9,7 +10,6 @@ def recv_one_frame(conn):
         return k
     except:
         return False
-
 
 
 if __name__ == '__main__':
@@ -23,24 +23,29 @@ if __name__ == '__main__':
     # type: 套接字类型可以根据是面向连接的还是非连接分为SOCK_STREAM或SOCK_DGRAM
     # protocol: 一般不填默认为0.
 
-    host = "192.168.43.123" # 获取本地主机名
+    host = '192.168.43.43' # 获取本地主机名
     port = 12340                # 设置端口
 
     sk.bind((host,port))
-    sk.listen(2)
+    sk.listen(1)
     # 开始TCP监听。backlog指定在拒绝连接之前，
     # 操作系统可以挂起的最大连接数量。该值至少为1，大部分应用程序设为5就可以了。
 
     print("waiting for the client...")
     conn, address = sk.accept()# 被动接受TCP客户端连接,(阻塞式)等待连接的到来
 
+    all_num = 0
+    error_num = 0
     while True:
+        all_num += 1
         frame = recv_one_frame(conn)
         if frame is False :
-            continue
             print("网络不稳定！")
+            error_num += 1 
+            print ("掉包率{:.3f}%".format(error_num*100 / all_num))
+            continue
         else :
-            cv2.imshow('test', frame)
+            cv2.imshow('test', np.tile(frame, (2, 2, 1)))
             if (cv2.waitKey(1) & 0xFF) == ord('q'):
                 break
 

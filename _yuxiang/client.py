@@ -1,20 +1,23 @@
 import socket 
 import cv2 
 import numpy as np
+import time
 
-h = 48*4
-w = 64*4
+h = 480
+w = 640
 c = 3
 
 def send_one_frame(sk):
     ret, frame = cap.read()
     sk.send(frame.tobytes())
+    # time.sleep(0.1)
 
 
 if __name__ == '__main__':
     sk = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
-    host = '192.168.137.140' # 获取本地主机名
+    host = '192.168.43.43' # 获取本地主机名
+
     port = 12340               # 设置端口号
 
     # 主动初始化TCP服务器连接，。一般ad dress的格式为元组（hostname,port），
