@@ -16,18 +16,17 @@ def ReceiveVideo():
 
 	# UDP不需要建立连接
 	bfsize = 46080
-	chuncksize = 46082
+	chuncksize = 46081
 	
 	frame = numpy.zeros(bfsize*20, dtype=numpy.uint8)
 	cnt = 0
-	flg = 0
 	s = b''
 	while 1:
 		# start = time.time()#用于计算帧率信息
 		cnt += 1
 		data, addr = sock.recvfrom(chuncksize)
-		i = int(data[-2:].decode())
-		line_data = numpy.frombuffer(data[:-2], dtype=numpy.uint8)
+		i = int.from_bytes(data[-1:], byteorder='big')
+		line_data = numpy.frombuffer(data[:-1], dtype=numpy.uint8)
 		frame[i*46080:(i+1)*46080] = line_data
 		if cnt == 20:
 		    cv2.imshow("frame", frame.reshape(480, 640, 3))
@@ -67,7 +66,7 @@ def ReceiveVideo():
 		if k == 27:
 			break
 		"""
-	s.close()
+	sock.close()
 	cv2.destroyAllWindows()
  
 if __name__ == '__main__':
