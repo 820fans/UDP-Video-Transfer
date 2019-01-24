@@ -26,7 +26,7 @@ class WebVideoStream:
 		self.stream = cv2.VideoCapture(src)
 		self.stream.set(cv2.CAP_PROP_MODE, cv2.CAP_MODE_YUYV)
 		# print(self.stream.get(cv2.CAP_PROP_FPS)) # 默认帧率30
-		self.stream.set(cv2.CAP_PROP_FPS, 20)   # cv version is 3.4.2
+		# self.stream.set(cv2.CAP_PROP_FPS, 20)   # cv version is 3.4.2
 		self.stopped = False
 
 		self.address = None
@@ -80,23 +80,13 @@ class WebVideoStream:
 			# otherwise, read the next frame from the stream
 			(grabbed, frame_raw) = self.stream.read()
 			
-			frame_s = frame_raw.flatten().tostring()
-			
-			s = 0
 			for i in range(self.packer.frame_pieces):
 				time.sleep(0.005)
 				now = int(time.time()*1000)
-				data = frame_s[i*piece_size:(i+1)*piece_size]
-				data_len = len(data)
-				# t1 = time.time()
-				# result, imgencode = cv2.imencode('.jpg', frame_raw[i*self.packer.idx_frame:(i+1)*self.packer.idx_frame], self.packer.encode_param)
-				# t2 = time.time()
-				# s += (t2-t1)
-				# print(len(frame_raw[i*self.packer.idx_frame:(i+1)*self.packer.idx_frame].flatten().tostring()))
-				# print(len(imgencode))
-				res = self.packer.pack_data(data_len, i, now, data)
+				res = self.packer.pack_data(i, now, frame_raw)
 				self.frame = res
-			# print("compress time for one image:",s)
+				
+		return
 
 	def read(self):
 		# return the frame most recently read
@@ -123,7 +113,7 @@ def SendVideo():
 			# t2 = time.time()
 			# print(t2-t1)
 			if frame:
-				pass
+				# print(len(frame))
 				sock.sendto(frame, wvs.address)
 	else:
 		con = Config()

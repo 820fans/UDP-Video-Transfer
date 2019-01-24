@@ -6,6 +6,12 @@ import cv2
 import numpy
 from config import Config
 from packer import Packer
+import logging
+
+logging.basicConfig(level=logging.DEBUG, 
+                    filename='output.log',
+					format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class NetVideoStream:
 	def __init__(self, queue_size=128):
@@ -62,11 +68,14 @@ class NetVideoStream:
 			# otherwise, ensure the queue has room in it
 			if not self.Q.full():
 				data, addr = sock.recvfrom(self.packer.pack_len)
-				idx, ctime, img = self.packer.unpack_data(data)
-				line_data = numpy.frombuffer(img, dtype=numpy.uint8)
+				idx, ctime, raw_img = self.packer.unpack_data(data)
+				line_data = numpy.frombuffer(raw_img, dtype=numpy.uint8)
+				line_data = cv2.imdecode(line_data, 1).flatten()
+				# self.stopped = True
 				# # add the frame to the queue
 				self.Q.put({
 					'idx': idx,
+					'time': ctime,
 					'frame': line_data
 				})
 			else:
@@ -78,10 +87,10 @@ class NetVideoStream:
 		pass
 
 	def read(self):
-		# print(self.Q.qsize()) # 单机运行的时候，queue的长度持续增大
+		# logger.info(self.Q.qsize()) # 单机运行的时候，queue的长度持续增大
 		# 拥塞控制(这里可以用个算法,时间限制就写简单点)
-		frame = self.Q.get().copy()
-		if self.Q.qsize() > self.queue_size*0.1: 
+		frame = self.Q.get()
+		if self.Q.qsize() > 3: # self.queue_size*0.1
 			self.Q = Queue()
 			if self.Q.mutex:
 				self.Q.queue.clear()
@@ -111,17 +120,19 @@ def ReceiveVideo():
 	t = 0
 	if t==0:
 		nvs = NetVideoStream().start()
-		bfsize = nvs.packer.piece_size
-		frame = numpy.zeros(bfsize*nvs.packer.frame_pieces, dtype=numpy.uint8)
+		idx_frame = nvs.packer.idx_frame
+		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
 		cnt = 0
 		while True:
 			cnt += 1
 			pack = nvs.read()
-			i = pack['idx']
+			idx = pack['idx']
 			data = pack['frame']
-			frame[i*bfsize:(i+1)*bfsize] = data
-			if cnt == 20:
-				cv2.imshow("FireStreamer", frame.reshape(480, 640, 3))
+			row_start = idx*nvs.packer.piece_size
+			row_end = (idx+1)*nvs.packer.piece_size
+			frame[row_start:row_end] = data
+			if cnt == nvs.packer.frame_pieces:
+				cv2.imshow("FireStreamer", frame.reshape(nvs.packer.h, nvs.packer.w, nvs.packer.d))
 				cnt = 0
 
 			if cv2.waitKey(1) & 0xFF == ord('q'):
