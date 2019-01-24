@@ -6,11 +6,11 @@ import sys
 import time
 
 
-jpeg_quality = 70
+jpeg_quality = 80
 host = '192.168.43.43'
 port = 12340
 server_address = (host, port)
-client_address = ('192.168.43.6', port)
+client_address = ('192.168.43.43', port)
 buffersize = 65507
 
 
@@ -76,8 +76,6 @@ if __name__ == '__main__':
 
     sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    print('starting up on %s port %s\n' % server_address)
-
     sk.bind(client_address)
 
     while(running):
@@ -88,7 +86,7 @@ if __name__ == '__main__':
             buffer = grabber1.get_buffer()
             if buffer is None:
                 continue
-            print(len(buffer))
+            # print(len(buffer))
             if len(buffer) > 65507:
                 print("The message is too large to be sent within a single UDP datagram. We do not handle splitting the message in multiple datagrams")
                 sk.sendto(b"FAIL",address)
