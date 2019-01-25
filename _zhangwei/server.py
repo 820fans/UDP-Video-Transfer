@@ -33,7 +33,7 @@ class NetVideoStream:
 		self.config = Config()
 		self.packer = Packer()
 		self.init_config()
-		# self.Q = PriorityQueue(maxsize=self.queue_size)
+		self.Q = PriorityQueue(maxsize=self.queue_size)
 		self.Q = Queue(maxsize=self.queue_size)
 		self.init_main_connection()
 
@@ -113,7 +113,7 @@ class NetVideoStream:
 
 	def read(self):
 		# frame = self.Q.get()
-		# if self.Q.qsize() > self.queue_size*0.1: # self.queue_size*0.1
+		# if self.Q.qsize() > self.queue_size*0.3: # self.queue_size*0.1
 		# 	self.Q = Queue()
 		# 	if self.Q.mutex:
 		# 		self.Q.queue.clear()
@@ -128,7 +128,7 @@ class NetVideoStream:
 			frame = self.Q.get()
 			ctime = frame.ctime
 			# select only when frametime is later than previous frame
-			if ctime > self.last_frame:
+			if ctime >= self.last_frame:
 				# print("time-delay:",now - ctime," ms")
 				self.last_frame = ctime
 				break
@@ -167,9 +167,6 @@ def ReceiveVideo():
 		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
 		cnt = 0
 		while nvs.more():
-			# data, client = sk.recvfrom(nvs.packer.pack_len)
-			# sent =  nvs.sock.sendto(b"get", nvs.address)
-			# print("haaaaa")
 			cnt += 1
 			pack = nvs.read()
 			if pack is not None:
