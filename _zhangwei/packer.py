@@ -19,11 +19,7 @@ class Packer:
     def __init__(self):
 		#压缩参数，后面cv2.imencode将会用到，对于jpeg来说，15代表图像质量，越高代表图像质量越好为 0-100，默认95
         self.encode_param=[int(cv2.IMWRITE_JPEG_QUALITY), 80]
-
         self.init_config()
-        # 这里的队列，用于多线程压缩图片之后，放入队列
-        # Python的队列是线程安全的
-        self.Q = Queue(maxsize=self.queue_size)
     
     def init_config(self):
         config = Config()
@@ -48,41 +44,26 @@ class Packer:
         self.head_len = len(self.head_name) + self.head_data_len_len + self.head_index_len + self.head_time_len
         # self.pack_len = self.head_len + self.piece_size # 46096
 
-        # 初始化队列大小信息
-        self.queue_size = int(config.get("receive", "queue_size"))
-
-    def pack_data(self, index, create_time, data):
+    def pack_data(self, index, create_time, data, Q):
         """
         Pack data over udp
         """
+        if len(data) == 0:
+            return None
         # intialize compress thread
-        thread = Thread(target=self.compress, args=(index, create_time, data,))
+        thread = Thread(target=self.compress, args=(index, create_time, data, Q))
         thread.daemon = True
         thread.start()
 
-        pack = None
-        while pack is None:
-            pack = self.read_compress()
-
-        return pack
-
-    def read_compress(self):
-        # print(self.Q.qsize()) # 单机运行的时候，queue的长度持续增大
-        # 拥塞控制(这里可以用个算法,时间限制就写简单点)
-        frame = self.Q.get()
-        # if self.Q.qsize() > self.queue_size*0.5: 
-        #     self.Q = Queue()
-        #     if self.Q.mutex:
-        #         self.Q.queue.clear()
-        return frame
-
-    def compress(self, idx, create_time, frame_raw):
+    def compress(self, idx, create_time, frame_raw, Q):
         if len(frame_raw) == 0: return
         row_start = idx*self.idx_frame
         row_end = (idx+1)*self.idx_frame
-        result, imgencode = cv2.imencode('.jpg', 
-            frame_raw[row_start:row_end],
-            self.encode_param)
+        try:
+            result, imgencode = cv2.imencode('.jpg', 
+                frame_raw[row_start:row_end], self.encode_param)
+        except:
+            return
         if result:
             imgbytes = imgencode.tobytes()
             data_len = len(imgbytes)
@@ -92,7 +73,7 @@ class Packer:
             pad_bytes = b'\0' * (self.img_len - data_len)
             res += imgbytes
             res += pad_bytes
-            self.Q.put(res)
+            Q.put(res)
         return 1
 
     def unpack_data(self, res):

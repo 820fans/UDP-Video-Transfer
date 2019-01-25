@@ -30,8 +30,8 @@ class NetVideoStream:
 		self.config = Config()
 		self.packer = Packer()
 		self.init_config()
-		self.Q = PriorityQueue(maxsize=self.queue_size)
-		# self.Q = Queue(maxsize=self.queue_size)
+		# self.Q = PriorityQueue(maxsize=self.queue_size)
+		self.Q = Queue(maxsize=self.queue_size)
 		self.init_main_connection()
 
 		# init timestamp
@@ -152,7 +152,10 @@ class NetVideoStream:
 		last_frame = time.time()
 		cnt = 0
 		while nvs.more():
-			print(self.Q.qsize())
+			if cv2.waitKey(1) & 0xFF == ord('q'):
+				break
+
+			#print(self.Q.qsize())
 			pack = self.Q.get()
 			# for i in range(10):
 			# 	pack = self.Q.get()
@@ -175,7 +178,7 @@ class NetVideoStream:
 			if cnt == nvs.packer.frame_pieces:
 				cv2.imshow("FireStreamer", frame.reshape(nvs.packer.h, nvs.packer.w, nvs.packer.d))
 				t_aftershow = int(time.time()*1000)
-				print("piece delay is:", (t_aftershow-last_frame))
+				# print("piece delay is:", (t_aftershow-last_frame))
 				self.last_frame = last_frame = ctime
 				cnt = 0
 
@@ -184,8 +187,6 @@ class NetVideoStream:
 				if self.Q.mutex:
 					self.Q.queue.clear()
 
-			if cv2.waitKey(1) & 0xFF == ord('q'):
-				break
 
 	def show_thread(self, pack, frame):
 		idx = pack.idx
@@ -217,10 +218,9 @@ def ReceiveVideo():
 
 	t = 0
 	if t==0:
-		NetVideoStream().read_show() # 一次性使用
+		# NetVideoStream().read_show() # 一次性使用
 
 		# 下面的不会执行
-		print("unexpected")
 		nvs = NetVideoStream().start()
 		idx_frame = nvs.packer.idx_frame
 		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
@@ -287,9 +287,7 @@ def ReceiveVideo():
 		if k == 27:
 			break
 		"""
-	sent =  nvs.main_sock.sendto(b"quit", client_address)
 	print("The server is quitting. ")
-	sock.close()
 	cv2.destroyAllWindows()
  
 if __name__ == '__main__':

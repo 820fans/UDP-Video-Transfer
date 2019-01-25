@@ -26,7 +26,7 @@ class WebVideoStream:
 		self.stream = cv2.VideoCapture(src)
 		# self.stream.set(cv2.CAP_PROP_MODE, cv2.CAP_MODE_YUYV)
 		# print(self.stream.get(cv2.CAP_PROP_FPS)) # 默认帧率30
-		self.stream.set(cv2.CAP_PROP_FPS, 20)   # cv version is 3.4.2
+		# self.stream.set(cv2.CAP_PROP_FPS, 20)   # cv version is 3.4.2
 		self.stopped = False
 		
 		self.requesting = False
@@ -43,7 +43,8 @@ class WebVideoStream:
 		# intialize thread and lock
 		self.thread = Thread(target=self.update, args=())
 		self.thread.daemon = True
-		# self.lock = 
+		
+		self.lock = Lock()
 
 		self.Q = Queue(maxsize=self.queue_size)
 
@@ -91,10 +92,9 @@ class WebVideoStream:
 			
 			now = int(time.time()*1000)
 			for i in range(self.packer.frame_pieces):
-				res = self.packer.pack_data(i, now, frame_raw)
-				# self.frame = res
-				self.Q.put(res)		
-				
+				self.packer.pack_data(i, now, frame_raw, self.Q)
+			# now2 = int(time.time()*1000)
+			# print("Time to get a frame:", (now2-now))
 		return
 
 	def get_request(self):
