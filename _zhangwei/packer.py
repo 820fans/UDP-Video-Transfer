@@ -77,6 +77,7 @@ class Packer:
         return frame
 
     def compress(self, idx, create_time, frame_raw):
+        if len(frame_raw) == 0: return
         row_start = idx*self.idx_frame
         row_end = (idx+1)*self.idx_frame
         result, imgencode = cv2.imencode('.jpg', 
