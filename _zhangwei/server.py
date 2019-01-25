@@ -19,12 +19,9 @@ class FramePack(object):
 		self.idx = idx
 		self.ctime = ctime
 		self.frame = frame
-	
-	def __cmp__(self, other):
-		return cmp(other.ctime, self.ctime)
 
 	def __lt__(self, other):
-		return other.ctime < self.ctime
+		return self.ctime > other.ctime 
 
 class NetVideoStream:
 	def __init__(self, queue_size=128):
@@ -34,12 +31,8 @@ class NetVideoStream:
 		self.packer = Packer()
 		self.init_config()
 		self.Q = PriorityQueue(maxsize=self.queue_size)
-		self.Q = Queue(maxsize=self.queue_size)
+		# self.Q = Queue(maxsize=self.queue_size)
 		self.init_main_connection()
-
-		# intialize thread
-		self.thread = Thread(target=self.update, args=())
-		self.thread.daemon = True
 
 		# init timestamp
 		self.last_frame = int(time.time()*1000)
@@ -70,7 +63,17 @@ class NetVideoStream:
 		except socket.error as msg:
 			print(msg)
 			sys.exit(1)
-	
+
+	def init_connection_sock(self):
+		try:
+			sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+			sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			sock.bind(self.address)
+			return sock
+		except socket.error as msg:
+			print(msg)
+			sys.exit(1)
+
 	def init_main_connection(self):
 		try:
 			self.main_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
@@ -84,16 +87,22 @@ class NetVideoStream:
 		self.sock.close()
 
 	def start(self):
-		# start a thread to read frames from the file video stream
-		self.thread.start()
+		# start threads to recieve
+		for i in range(self.packer.frame_pieces):
+			# intialize thread
+			thread = Thread(target=self.recv_thread, args=(i,))
+			thread.daemon = True
+
+			thread.start()
+
 		return self
 
-	def update(self):
-		self.init_connection()
-		sock = self.sock
-		# keep looping infinitely
+	def recv_thread(self, thread_idx):
+		sock = self.init_connection_sock()
+
+		stopped = False
 		while True:
-			if self.stopped: break
+			if stopped: break
 			# otherwise, ensure the queue has room in it
 			if not self.Q.full():
 				try:
@@ -101,15 +110,12 @@ class NetVideoStream:
 					idx, ctime, raw_img = self.packer.unpack_data(data)
 					line_data = numpy.frombuffer(raw_img, dtype=numpy.uint8)
 					line_data = cv2.imdecode(line_data, 1).flatten()
-					# self.stopped = True
-					# # add the frame to the queue
+					# add the frame to the queue
 					self.Q.put(FramePack(idx, ctime, line_data))
 				except:
 					pass
 			else:
 				time.sleep(0.01)  # Rest for 10ms, we have a full queue
-
-		self.stream.release()
 
 	def read(self):
 		# frame = self.Q.get()
@@ -133,11 +139,60 @@ class NetVideoStream:
 				self.last_frame = ctime
 				break
 
-		if self.Q.qsize() > self.queue_size*0.3: # self.queue_size*0.1
+		if self.Q.qsize() > self.queue_size*0.5: # self.queue_size*0.1
 			self.Q = Queue()
 			if self.Q.mutex:
 				self.Q.queue.clear()
 		return frame
+
+	def read_show(self):
+		nvs = self.start()
+		idx_frame = nvs.packer.idx_frame
+		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
+		last_frame = time.time()
+		cnt = 0
+		while nvs.more():
+			print(self.Q.qsize())
+			pack = self.Q.get()
+			for i in range(10):
+				pack = self.Q.get()
+				print("show: ", pack.ctime)
+			time.sleep(2)
+			continue
+			try: ctime = pack.ctime
+			except: continue
+			# select only when frametime is later than previous frame
+			if ctime >= self.last_frame:
+				# print("time-delay:",now - ctime," ms")
+				self.last_frame = ctime
+				cnt += 1
+				idx = pack.idx
+				data = pack.frame
+				row_start = idx*nvs.packer.piece_size
+				row_end = (idx+1)*nvs.packer.piece_size
+				frame[row_start:row_end] = data
+			# print(data)
+			if cnt == nvs.packer.frame_pieces:
+				cv2.imshow("FireStreamer", frame.reshape(nvs.packer.h, nvs.packer.w, nvs.packer.d))
+				t_aftershow = int(time.time()*1000)
+				print("piece delay is:", (t_aftershow-last_frame))
+				self.last_frame = last_frame = ctime
+				cnt = 0
+
+			if self.Q.qsize() > self.queue_size*0.15: # self.queue_size*0.1
+				self.Q = Queue()
+				if self.Q.mutex:
+					self.Q.queue.clear()
+
+			if cv2.waitKey(1) & 0xFF == ord('q'):
+				break
+
+	def show_thread(self, pack, frame):
+		idx = pack.idx
+		data = pack.frame
+		row_start = idx*nvs.packer.piece_size
+		row_end = (idx+1)*nvs.packer.piece_size
+		frame[row_start:row_end] = data
 
 	def running(self):
 		return self.more() or not self.stopped
@@ -162,6 +217,10 @@ def ReceiveVideo():
 
 	t = 0
 	if t==0:
+		NetVideoStream().read_show() # 一次性使用
+
+		# 下面的不会执行
+		print("unexpected")
 		nvs = NetVideoStream().start()
 		idx_frame = nvs.packer.idx_frame
 		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)

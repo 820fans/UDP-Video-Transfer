@@ -156,7 +156,7 @@ def SendVideo():
 			# if wvs.request:
 			if True:
 				frame = wvs.read()
-				# time.sleep(0.001)
+				time.sleep(0.001)
 				if frame:
 					# print(len(frame))
 					sock.sendto(frame, wvs.address)
