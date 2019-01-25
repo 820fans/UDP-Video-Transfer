@@ -154,11 +154,11 @@ class NetVideoStream:
 		while nvs.more():
 			print(self.Q.qsize())
 			pack = self.Q.get()
-			for i in range(10):
-				pack = self.Q.get()
-				print("show: ", pack.ctime)
-			time.sleep(2)
-			continue
+			# for i in range(10):
+			# 	pack = self.Q.get()
+			# 	print("show: ", pack.ctime)
+			# time.sleep(2)
+			# continue
 			try: ctime = pack.ctime
 			except: continue
 			# select only when frametime is later than previous frame
