@@ -14,3 +14,8 @@ Q.put(Pack(1, 1548397750871))
 
 print(Q.get().ctime)
 print(Q.get().ctime)
+
+arr = []
+for i in range(10):
+	arr.append(None)
+print(arr[3])

@@ -1,4 +1,4 @@
-from threading import Thread, Lock
+from threading import Thread
 from queue import Queue, PriorityQueue
 import socket
 import time
@@ -34,21 +34,10 @@ class NetVideoStream:
 		self.Q = Queue(maxsize=self.queue_size)
 		self.img_Q = Queue(maxsize=self.queue_size)
 
-		self.piece_array = []
-		self.piece_time = int(time.time()*1000)
-		self.piece_fps = 40
-		for i in range(self.packer.frame_pieces):
-			self.piece_array.append(None)
-
 		# init timestamp
 		self.frame = numpy.zeros(self.packer.frame_size_3d, dtype=numpy.uint8)
-		self.imshow = self.frame.reshape(self.packer.h, self.packer.w, self.packer.d)
 		self.last_frame_time = int(time.time()*1000)
 		self.require = True
-		self.time_delay = 0
-		self.delay_timer = int(time.time()*1000)
-
-		self.lock = Lock()
 
 	def init_config(self):
 		# 初始化大小信息
@@ -114,7 +103,6 @@ class NetVideoStream:
 			# 不断地从队列里面取数据尝试
 			try:
 				pack = self.Q.get()
-				ptime = pack.ctime
 				loop = self.packer.frame_pieces - 1
 				# print(pack is not None)
 				while (pack is not None) and (loop >= 0):
@@ -128,8 +116,6 @@ class NetVideoStream:
 					pack = self.Q.get()
 					loop -= 1
 				self.img_Q.put(self.frame.reshape(self.packer.h, self.packer.w, self.packer.d))
-				ctime = int(time.time()*1000)
-				self.time_delay =  ctime - ptime
 			except:
 				pass
 		return
@@ -184,13 +170,11 @@ class NetVideoStream:
 		return frame
 
 	def read_img(self):
-		# return self.imshow
-		print(self.img_Q.qsize())
+		# print(self.img_Q.qsize())
 		if self.img_Q.qsize() == 0:
 			return None
 		frame = self.img_Q.get()
 		if self.img_Q.qsize() > self.packer.frame_limit: # self.queue_size*0.1
-			# print("exeed limit")
 			self.img_Q = Queue()
 			if self.img_Q.mutex:
 				self.img_Q.queue.clear()
@@ -199,33 +183,28 @@ class NetVideoStream:
 	def read_show(self):
 		nvs = self.start()
 		last_frame_time = time.time()
-		tshow = 0
 		while True:
 			# print("reading img")
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
-
-			# now = time.time()
+			now = time.time()
 			frame = self.read_img()
+			ctime = time.time() - now
 			if frame is not None:
-				cnow = int(time.time()*1000)
-				if cnow - nvs.delay_timer > 200:
-					nvs.delay_timer = cnow
-					tshow = nvs.time_delay
 				font                   = cv2.FONT_HERSHEY_SIMPLEX
 				bottomLeftCornerOfText = (10,50)
 				fontScale              = 1
 				fontColor              = (0,0,255)
 				lineType               = 2
-				cv2.putText(frame, 'Get Fire! Recieve Delay: ' + str(tshow).ljust(3) + " ms",
+				cv2.putText(img, 'Get Fire! Recieve FPS:' + str(int(1.0/(ctime))),
 					bottomLeftCornerOfText, 
 					font, 
 					fontScale,
 					fontColor,
 					lineType)
 				cv2.imshow("Receive server", frame)
-				last_frame_time = int(time.time()*1000)
-			# print("piece show time is:", (now - last_frame_time))
+				t_aftershow = int(time.time()*1000)
+			# print("piece delay is:", (t_aftershow-last_frame))
 
 	def running(self):
 		return self.more() or not self.stopped
@@ -251,7 +230,6 @@ def ReceiveVideo():
 	t = 0
 	if t==0:
 		NetVideoStream().read_show() # 一次性使用
-
 		print("unex")
 		# 下面的不会执行
 		nvs = NetVideoStream().start()

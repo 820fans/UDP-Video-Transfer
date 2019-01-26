@@ -1,6 +1,6 @@
 from threading import Thread, Lock
 # from queue import Queue
-# from collections import deque as Queue
+from collections import deque as Queue
 import socket
 import cv2
 import numpy
@@ -46,19 +46,11 @@ class WebVideoStream:
 		self.request = False
 		self.quit = False
 
-		self.fps = 40
-		self.push_sleep = 0.01
-		self.push_sleep_min = 0.001
-		self.push_sleep_max = 0.2
+		self.push_sleep = 0.2
+		self.push_sleep_min = 0.2
+		self.push_sleep_max = 0.5
 
-		self.piece_array = []
-		self.piece_time = int(time.time()*1000)
-		self.piece_fps = 40
-		for i in range(self.packer.frame_pieces):
-			self.piece_array.append(None)
-
-		self.frame = numpy.zeros(self.packer.frame_size_3d, dtype=numpy.uint8)
-		self.imshow = self.frame.reshape(self.packer.h, self.packer.w, self.packer.d)
+		self.frame = None
 		self.frame_size = 0
 		self.piece_size = 0
 		self.frame_pieces = 0
@@ -68,7 +60,9 @@ class WebVideoStream:
 		# intialize thread and lock
 		self.thread = Thread(target=self.update, args=())
 		self.thread.daemon = True
-		
+
+		self.Q = Queue()
+
 	def init_config(self):
 		config = self.config
 		# 初始化连接信息
@@ -98,7 +92,6 @@ class WebVideoStream:
 	def start(self):
 		# start a thread to read frames from the file video stream
 		self.thread.start()
-		
 		return self
 
 	def update(self):
@@ -109,24 +102,24 @@ class WebVideoStream:
 			if self.stopped:
 				return
 
-			time.sleep(self.push_sleep)
 			# otherwise, read the next frame from the stream
 			(grabbed, frame_raw) = self.stream.read()
 		
+			if self.Q_stuck_control():
+				time.sleep(self.push_sleep)
 			now = int(time.time()*1000)
 			for i in range(self.packer.frame_pieces):
-				self.packer.pack_data(i, now, frame_raw, self.piece_array, self.piece_time, self.piece_fps)
-			
-			# print("pfps:", self.piece_fps)
+				self.packer.pack_data(i, now, frame_raw, self.Q)
+				# self.Q.put(res)
 			# now2 = int(time.time()*1000)
 			# print("Time to get a frame:", (now2-now))
 		return
 
 	def Q_stuck_control(self):
-		if self.piece_fps > self.packer.send_fps:
-			self.push_sleep = min(self.push_sleep*2.0, self.push_sleep_max)
+		if len(self.Q) >= self.packer.send_piece_limit:
+			self.push_sleep = min(self.push_sleep/2.0, self.push_sleep_max)
 			return True
-		if self.piece_fps < self.packer.send_fps:
+		if len(self.Q) <= self.packer.send_piece_min:
 			self.push_sleep = max(self.push_sleep/2.0, self.push_sleep_min)
 		return False
 
@@ -153,27 +146,18 @@ class WebVideoStream:
 				self.quit = True
 				break
 
-	def read(self, i):
-		return self.piece_array[i]
+	def read(self):
+		# print(len(self.Q))
+		if len(self.Q) == 0: return None
+		frame = self.Q.popleft()
+		if len(self.Q) > self.packer.send_piece_limit: # self.queue_size*0.1
+			self.Q.clear()
+		return frame
 	
-	def read_send(self, i):
-		# while True:
-		# 	if cv2.waitKey(1) & 0xFF == ord('q'):
-		# 		break
-		# start threads to recieve
-		# for i in range(self.packer.frame_pieces):
-			# intialize thread
-		thread = Thread(target=self.send_thread, args=(i,))
-		thread.daemon = True
+	def read_total_frame_and_send(self):
 
-		thread.start()
-
-	def send_thread(self, i):
-		pack = self.piece_array[i]
-		if pack is None: return
-		self.sock.sendto(pack, self.address)
 		pass
-
+		
 	def stop(self):
 		# indicate that the thread should be stopped
 		self.stopped = True
@@ -188,58 +172,31 @@ def SendVideo():
 		address = wvs.address
 
 		running = True
+		cnt = 0
+		ctime = 0
 		while running:
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				running = False
 				continue
 			
+			time.sleep(0.05)
+			# print(len(wvs.Q))
+			# print(wvs.push_sleep)
 			now = time.time()
-			time.sleep(0.03)
-			ctime = 0
-			for i in range(wvs.packer.frame_pieces):
-				wvs.read_send(i)
+			frame = wvs.read()
 			now1 = time.time()
-			ctime = now1 - now
-			# print("frame time", ctime)
-			if ctime>0:
-				img = numpy.zeros((100,600,3), numpy.uint8)
-				font                   = cv2.FONT_HERSHEY_SIMPLEX
-				bottomLeftCornerOfText = (10,50)
-				fontScale              = 1
-				fontColor              = (255,255,255)
-				lineType               = 2
-				cv2.putText(img, 'Hello Fire! Send FPS:' + str(int(1.0/(ctime))),
-					bottomLeftCornerOfText, 
-					font, 
-					fontScale,
-					fontColor,
-					lineType)
-				cv2.imshow("Send clinet", img)
-			# 不断地从队列里面取数据尝试
-			# try:
-			# 	for i in range(wvs.packer.frame_pieces):
-			# 		pack = wvs.piece_array[i]
-			# 		line_data = cv2.imdecode(pack, 1).flatten()
-			# 		row_start = i*wvs.packer.piece_size
-			# 		row_end = (i+1)*wvs.packer.piece_size
-			# 		wvs.frame[row_start:row_end] = line_data
+			if frame:
+				# print(len(frame))
+				sock.sendto(frame, wvs.address)
+			cnt += 1
+			ctime += now1 - now
 
-			# 	frame = wvs.frame.reshape(wvs.packer.h, wvs.packer.w, wvs.packer.d)
-			# 	if frame is not None:
-			# 		cv2.imshow("FireStreamer", frame)
-			# except:
-			# 	pass
-			# now = time.time()
-				# frame = wvs.read(i)
-				# if frame:
-				# 	# print(len(frame))
-				# 	time.sleep(0.05)
-				# 	sock.sendto(frame, wvs.address)
-			# now1 = time.time()
-			# ctime += now1 - now
-			# print("frame time", ctime)
-			# if ctime>0:
-			# 	print("fps:", (1.0/(ctime)))
+			if cnt == wvs.packer.frame_pieces:
+				print("frame time", ctime)
+				if ctime>0:
+					print("fps:", (1.0/(ctime/10)))
+					print(len(wvs.Q))
+				cnt = 0
 
 
 	else:

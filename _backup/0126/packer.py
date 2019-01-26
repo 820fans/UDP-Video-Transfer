@@ -1,6 +1,6 @@
 from threading import Thread
 # from queue import Queue
-# from collections import deque as Queue
+from collections import deque as Queue
 import socket
 import time
 import cv2
@@ -24,7 +24,7 @@ class Packer:
         self.init_config()
         # 这里的队列，用于多线程压缩图片之后，放入队列
         # Python的队列是线程安全的
-        # self.Q = Queue()
+        self.Q = Queue()
     
     def init_config(self):
         config = Config()
@@ -53,21 +53,19 @@ class Packer:
         self.queue_size = int(config.get("receive", "queue_size"))
         self.frame_limit = int(config.get("receive", "frame_limit"))
         self.piece_limit = int(config.get("receive", "piece_limit"))
-        self.farme_delay = float(config.get("receive", "frame_delay"))
 
         self.queue_size = int(config.get("send", "queue_size"))
         self.send_piece_limit = int(config.get("send", "piece_limit"))
         self.send_piece_min = int(config.get("send", "piece_min"))
-        self.send_fps = int(config.get("send", "fps"))
 
-    def pack_data(self, index, create_time, data, piece_array, piece_time, piece_fps):
+    def pack_data(self, index, create_time, data, Q):
         """
         Pack data over udp
         """
         if len(data) == 0:
             return None
         # intialize compress thread
-        thread = Thread(target=self.compress, args=(index, create_time, data, piece_array, piece_time, piece_fps))
+        thread = Thread(target=self.compress, args=(index, create_time, data, Q))
         thread.daemon = True
         thread.start()
 
@@ -87,7 +85,7 @@ class Packer:
         #         self.Q.queue.clear()
         return frame
 
-    def compress(self, idx, create_time, frame_raw, piece_array, piece_time, piece_fps):
+    def compress(self, idx, create_time, frame_raw, Q):
         if len(frame_raw) == 0: return
         row_start = idx*self.idx_frame
         row_end = (idx+1)*self.idx_frame
@@ -105,16 +103,8 @@ class Packer:
             # pad_bytes = b'\0' * (self.img_len - data_len)
             res += imgbytes
             # res += pad_bytes
-            # Q.append(res)
-            piece_array[idx] = res
-            if create_time - piece_time != 0:
-                piece_fps = self.cacu_fps(create_time - piece_time)
-            piece_time = create_time
-            # print("ptime", piece_fps)
+            Q.append(res)
         return 1
-        
-    def cacu_fps(self, ptime):
-        return int(1000/(ptime*1.0))
 
     def unpack_data(self, res):
         data_len=0
