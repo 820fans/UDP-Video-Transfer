@@ -20,7 +20,7 @@ class Packer:
     def __init__(self):
 		#压缩参数，后面cv2.imencode将会用到，对于jpeg来说，15代表图像质量，越高代表图像质量越好为 0-100，默认95
         self.encode_param=[int(cv2.IMWRITE_JPEG_QUALITY), 80]
-
+        self.info_pack_len = 16
         self.init_config()
         # 这里的队列，用于多线程压缩图片之后，放入队列
         # Python的队列是线程安全的
@@ -59,6 +59,7 @@ class Packer:
         self.send_piece_limit = int(config.get("send", "piece_limit"))
         self.send_piece_min = int(config.get("send", "piece_min"))
         self.send_fps = int(config.get("send", "fps"))
+        self.recv_fps_limit = int(config.get("send", "recv_fps"))
 
     def pack_data(self, index, create_time, data, piece_array, piece_time, piece_fps):
         """
@@ -91,6 +92,7 @@ class Packer:
         if len(frame_raw) == 0: return
         row_start = idx*self.idx_frame
         row_end = (idx+1)*self.idx_frame
+        # print(len(frame_raw[row_start:row_end].flatten()))
         try:
             result, imgencode = cv2.imencode('.jpg', 
                 frame_raw[row_start:row_end], self.encode_param)
@@ -144,3 +146,16 @@ class Packer:
         index = int.from_bytes(head_block[8:9], byteorder='big')
         create_time = int.from_bytes(head_block[9:self.head_len], byteorder='big')
         return name, data_len, index, create_time
+
+    def pack_info_data(self, fps, ctime):
+        res = b''
+        res += self.head_name.encode()
+        res += fps.to_bytes(4, byteorder="big")
+        res += ctime.to_bytes(8, byteorder="big")
+        return res
+    
+    def unpack_info_data(self, block):
+        name = block[:4]
+        server_fps = int.from_bytes(block[4:8], byteorder='big')
+        ctime = int.from_bytes(block[8:16], byteorder='big')
+        return name, server_fps, ctime

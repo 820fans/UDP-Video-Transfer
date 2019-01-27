@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 class WebVideoStream:
 	
 	def __init__(self, src="C:\\Tools\\titan_test.mp4"):
+		# 1080p D:\\kankan\\backup\\Automata.2014.1080p.BluRay.x264.YIFY.mp4
+		# 720p  C:\\Tools\\titan_test.mp4
 		self.config = Config()
 		self.packer = Packer()
 		# initialize the file video stream along with the boolean
@@ -29,13 +31,16 @@ class WebVideoStream:
 		os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
 		encode_param=[int(cv2.IMWRITE_JPEG_QUALITY),15]
 		self.stream = cv2.VideoCapture(src)
+		
+		self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, self.packer.w)   # float
+		self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, self.packer.h)  # float
 		# while True:
 		# 	if cv2.waitKey(1) & 0xFF == ord('q'):
 		# 		break
 		# 	ret, frame = self.stream.read()
 		# 	if ret:
 		# 		# print(frame.shape)
-		# 		# frame = frame.reshape(self.packer.h, self.packer.w, self.packer.d)
+		# 		frame = frame.reshape(self.packer.h, self.packer.w, self.packer.d)
 		# 		cv2.imshow('read video data.jpg', frame)
 		# self.stream.set(cv2.CAP_PROP_MODE, cv2.CAP_MODE_YUYV)
 		# print(self.stream.get(cv2.CAP_PROP_FPS)) # 默认帧率30
@@ -47,9 +52,16 @@ class WebVideoStream:
 		self.quit = False
 
 		self.fps = 40
+		self.recv_fps = 0
 		self.push_sleep = 0.01
 		self.push_sleep_min = 0.001
 		self.push_sleep_max = 0.2
+		
+		self.send_sleep = 0.01
+		self.send_sleep_min = 0.001
+		self.send_sleep_max = 0.05
+
+		self.network_delay = 0
 
 		self.piece_array = []
 		self.piece_time = int(time.time()*1000)
@@ -74,7 +86,9 @@ class WebVideoStream:
 		# 初始化连接信息
 		host = config.get("server", "host")
 		port = config.get("server", "port")
+		feed_port = config.get("server", "feed_port")
 		self.address = (host, int(port))
+		self.feed_address = (host, int(feed_port))
 
 		# 初始化delay信息
 		self.frame_delay = float(config.get("delay", "frame"))
@@ -95,10 +109,24 @@ class WebVideoStream:
 	def close_connection(self):
 		self.sock.close()
 
+	def init_feedback_connection(self):
+		try:
+			feed_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+			feed_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			feed_sock.bind(self.feed_address)
+			return feed_sock
+		except socket.error as msg:
+			print(msg)
+			sys.exit(1)
+
 	def start(self):
 		# start a thread to read frames from the file video stream
 		self.thread.start()
 		
+		decode_thread = Thread(target=self.recv_thread, args=())
+		decode_thread.daemon = True
+		decode_thread.start()
+
 		return self
 
 	def update(self):
@@ -109,13 +137,16 @@ class WebVideoStream:
 			if self.stopped:
 				return
 
+			self.Q_stuck_control()
 			time.sleep(self.push_sleep)
 			# otherwise, read the next frame from the stream
 			(grabbed, frame_raw) = self.stream.read()
-		
-			now = int(time.time()*1000)
-			for i in range(self.packer.frame_pieces):
-				self.packer.pack_data(i, now, frame_raw, self.piece_array, self.piece_time, self.piece_fps)
+
+			if grabbed:
+				# print(frame_raw.shape)
+				now = int(time.time()*1000)
+				for i in range(self.packer.frame_pieces):
+					self.packer.pack_data(i, now, frame_raw, self.piece_array, self.piece_time, self.piece_fps)
 			
 			# print("pfps:", self.piece_fps)
 			# now2 = int(time.time()*1000)
@@ -124,10 +155,18 @@ class WebVideoStream:
 
 	def Q_stuck_control(self):
 		if self.piece_fps > self.packer.send_fps:
-			self.push_sleep = min(self.push_sleep*2.0, self.push_sleep_max)
+			self.push_sleep = min(self.push_sleep * 2.0, self.push_sleep_max)
 			return True
 		if self.piece_fps < self.packer.send_fps:
-			self.push_sleep = max(self.push_sleep/2.0, self.push_sleep_min)
+			self.push_sleep = max(self.push_sleep - 0.01, self.push_sleep_min)
+		return False
+	
+	def send_stuck_control(self):
+		if self.recv_fps > self.packer.recv_fps_limit:
+			self.send_sleep = min(self.send_sleep * 2.0, self.send_sleep_max)
+			return True
+		if self.recv_fps < self.packer.recv_fps_limit:
+			self.send_sleep = max(self.send_sleep - 0.01, self.send_sleep_min)
 		return False
 
 	def get_request(self):
@@ -163,17 +202,33 @@ class WebVideoStream:
 		# start threads to recieve
 		# for i in range(self.packer.frame_pieces):
 			# intialize thread
+			
+		# pack = self.piece_array[i]
+		# if pack is None: return
+		# self.sock.sendto(pack, self.address)
 		thread = Thread(target=self.send_thread, args=(i,))
 		thread.daemon = True
-
 		thread.start()
 
 	def send_thread(self, i):
 		pack = self.piece_array[i]
 		if pack is None: return
 		self.sock.sendto(pack, self.address)
-		pass
 
+	def recv_thread(self):
+		feed_sock = self.init_feedback_connection()
+
+		while True:
+			try:
+				data, addr = feed_sock.recvfrom(self.packer.info_pack_len)
+				sname, server_fps, send_ctime = self.packer.unpack_info_data(data)
+				
+				now = int(time.time()*1000)
+				self.network_delay = int((now - send_ctime)/2.0)
+				self.recv_fps = server_fps
+			except:
+				pass
+			
 	def stop(self):
 		# indicate that the thread should be stopped
 		self.stopped = True
@@ -183,7 +238,6 @@ def SendVideo():
 	t = 0
 	if t == 0:
 		wvs = WebVideoStream().start()
-		# fps = FPS().start()
 		sock = wvs.sock
 		address = wvs.address
 
@@ -194,7 +248,10 @@ def SendVideo():
 				continue
 			
 			now = time.time()
-			time.sleep(0.03)
+			# camara_delay = 0.03
+			wvs.send_stuck_control()
+			time.sleep(wvs.send_sleep)
+			print(wvs.send_sleep)
 			ctime = 0
 			for i in range(wvs.packer.frame_pieces):
 				wvs.read_send(i)
@@ -202,13 +259,17 @@ def SendVideo():
 			ctime = now1 - now
 			# print("frame time", ctime)
 			if ctime>0:
-				img = numpy.zeros((100,600,3), numpy.uint8)
+				send_fps = str(int(1.0/ctime)).ljust(4)
+				recv_fps = str(wvs.recv_fps).ljust(4)
+				net_delay = str(wvs.network_delay).ljust(4)
+
+				img = numpy.zeros((100, 900,3), numpy.uint8)
 				font                   = cv2.FONT_HERSHEY_SIMPLEX
 				bottomLeftCornerOfText = (10,50)
-				fontScale              = 1
+				fontScale              = 0.7
 				fontColor              = (255,255,255)
 				lineType               = 2
-				cv2.putText(img, 'Hello Fire! Send FPS:' + str(int(1.0/(ctime))),
+				cv2.putText(img, 'Hello Fire! Send FPS:' + send_fps + ", Recv FPS:" + recv_fps + ", Net delay:" + net_delay,
 					bottomLeftCornerOfText, 
 					font, 
 					fontScale,
@@ -283,7 +344,7 @@ def SendVideo():
 		# receive = sock.recvfrom(1024)
 		# if len(receive): print(str(receive,encoding='utf-8'))
 		# if cv2.waitKey(10) == 27: break
-			
+	exit(0)	
 	# capture.release()
 	# cv2.destroyAllWindows()
 	# sock.close()
