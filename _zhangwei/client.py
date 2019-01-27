@@ -251,7 +251,8 @@ def SendVideo():
 			now = time.time()
 			# camara_delay = 0.03
 			wvs.send_stuck_control()
-			time.sleep(0.05)
+			time.sleep(wvs.send_sleep)
+			# time.sleep(0.05)
 			# print(wvs.send_sleep)
 			ctime = 0
 			for i in range(wvs.packer.frame_pieces):
