@@ -62,9 +62,10 @@ class NetVideoStream:
 		# 初始化连接信息
 		host = config.get("server", "host")
 		port = config.get("server", "port")
+		feed_host = config.get("server", "feed_host")
 		feed_port = config.get("server", "feed_port")
 		self.address = (host, int(port))
-		self.feed_address = (host, int(feed_port))
+		self.feed_address = (feed_host, int(feed_port))
 
 		# 初始化打包头信息
 		self.head_name = config.get("header", "name")

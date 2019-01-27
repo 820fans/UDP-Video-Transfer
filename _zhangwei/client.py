@@ -86,9 +86,10 @@ class WebVideoStream:
 		# 初始化连接信息
 		host = config.get("server", "host")
 		port = config.get("server", "port")
+		feed_host = config.get("server", "feed_host")
 		feed_port = config.get("server", "feed_port")
 		self.address = (host, int(port))
-		self.feed_address = (host, int(feed_port))
+		self.feed_address = (feed_host, int(feed_port))
 
 		# 初始化delay信息
 		self.frame_delay = float(config.get("delay", "frame"))
@@ -137,7 +138,7 @@ class WebVideoStream:
 			if self.stopped:
 				return
 
-			self.Q_stuck_control()
+			# self.Q_stuck_control()
 			time.sleep(self.push_sleep)
 			# otherwise, read the next frame from the stream
 			(grabbed, frame_raw) = self.stream.read()
@@ -203,12 +204,12 @@ class WebVideoStream:
 		# for i in range(self.packer.frame_pieces):
 			# intialize thread
 			
-		# pack = self.piece_array[i]
-		# if pack is None: return
-		# self.sock.sendto(pack, self.address)
-		thread = Thread(target=self.send_thread, args=(i,))
-		thread.daemon = True
-		thread.start()
+		pack = self.piece_array[i]
+		if pack is None: return
+		self.sock.sendto(pack, self.address)
+		# thread = Thread(target=self.send_thread, args=(i,))
+		# thread.daemon = True
+		# thread.start()
 
 	def send_thread(self, i):
 		pack = self.piece_array[i]
@@ -250,8 +251,8 @@ def SendVideo():
 			now = time.time()
 			# camara_delay = 0.03
 			wvs.send_stuck_control()
-			time.sleep(wvs.send_sleep)
-			print(wvs.send_sleep)
+			time.sleep(0.05)
+			# print(wvs.send_sleep)
 			ctime = 0
 			for i in range(wvs.packer.frame_pieces):
 				wvs.read_send(i)
