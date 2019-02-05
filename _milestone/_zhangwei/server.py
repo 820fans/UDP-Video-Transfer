@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG,
 					format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class PiecePack(object):
+class FramePack(object):
 	def __init__(self, idx, ctime, frame):
 		self.idx = idx
 		self.ctime = ctime
@@ -22,13 +22,6 @@ class PiecePack(object):
 
 	def __lt__(self, other):
 		return self.ctime > other.ctime 
-
-
-class FramePack(object):
-	def __init__(self, ctime, frame):
-		self.ctime = ctime
-		self.frame = frame
-
 
 class NetVideoStream:
 	def __init__(self, queue_size=128):
@@ -54,8 +47,8 @@ class NetVideoStream:
 		self.require = True
 		self.time_delay = 0
 		self.delay_timer = int(time.time()*1000)
-		self.receive_fps = 0
-		self.info_pack = None
+
+		self.lock = Lock()
 
 	def init_config(self):
 		# 初始化大小信息
@@ -63,10 +56,7 @@ class NetVideoStream:
 		# 初始化连接信息
 		host = config.get("server", "host")
 		port = config.get("server", "port")
-		feed_host = config.get("server", "feed_host")
-		feed_port = config.get("server", "feed_port")
 		self.address = (host, int(port))
-		self.feed_address = (feed_host, int(feed_port))
 
 		# 初始化打包头信息
 		self.head_name = config.get("header", "name")
@@ -101,7 +91,7 @@ class NetVideoStream:
 
 	def start(self):
 		# start threads to recieve
-		for i in range(self.packer.frame_pieces-8):
+		for i in range(self.packer.frame_pieces):
 			# intialize thread
 			thread = Thread(target=self.recv_thread, args=(i,))
 			thread.daemon = True
@@ -111,10 +101,6 @@ class NetVideoStream:
 		decode_thread = Thread(target=self.rebuild_thread, args=(i,))
 		decode_thread.daemon = True
 		decode_thread.start()
-
-		send_thread = Thread(target=self.send_thread, args=())
-		send_thread.daemon = True
-		send_thread.start()
 
 		return self
 
@@ -127,51 +113,25 @@ class NetVideoStream:
 					self.Q.queue.clear()
 			# 不断地从队列里面取数据尝试
 			try:
-				avg_time = 0
 				pack = self.Q.get()
-				pack_num = 1
-				
-				avg_time = ptime = pack.ctime
+				ptime = pack.ctime
 				loop = self.packer.frame_pieces - 1
 				# print(pack is not None)
 				while (pack is not None) and (loop >= 0):
 					idx = pack.idx
-					# ctime = pack.ctime
-					# avg_time += ctime
 					data = pack.frame
-
 					row_start = idx*self.packer.piece_size
 					row_end = (idx+1)*self.packer.piece_size
 					self.frame[row_start:row_end] = data
 					if self.Q.qsize() == 0:
 						break
 					pack = self.Q.get()
-					# pack_num += 1
 					loop -= 1
-				# self.img_Q.put(FramePack(avg_time/(pack_num*1.0), self.frame.reshape(self.packer.h, self.packer.w, self.packer.d)))
 				self.img_Q.put(self.frame.reshape(self.packer.h, self.packer.w, self.packer.d))
 				ctime = int(time.time()*1000)
 				self.time_delay =  ctime - ptime
-
-				self.info_pack = self.packer.pack_info_data(self.receive_fps, ptime)
 			except:
 				pass
-		return
-
-	def send_thread(self):
-		print("try")
-		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		s.connect(self.feed_address)
-		print("establish")
-		last_send = int(time.time()*1000)
-		while True:
-			if self.info_pack is None: continue
-			cnow = int(time.time()*1000)
-			if cnow - last_send > 500:
-				s.sendall(self.info_pack)
-				last_send = int(time.time()*1000)
-			pass
-		s.close()
 		return
 
 	def recv_thread(self, thread_idx):
@@ -185,15 +145,10 @@ class NetVideoStream:
 				try:
 					data, addr = sock.recvfrom(self.packer.pack_len)
 					idx, ctime, raw_img = self.packer.unpack_data(data)
-
 					line_data = numpy.frombuffer(raw_img, dtype=numpy.uint8)
 					line_data = cv2.imdecode(line_data, 1).flatten()
 					# add the frame to the queue
-					self.Q.put(PiecePack(idx, ctime, line_data))
-
-					# cnow = int(time.time()*1000)
-					# if cnow - delay_timer > 300:
-					# 	self.info_pack = self.packer.pack_info_data(self.receive_fps, ctime)
+					self.Q.put(FramePack(idx, ctime, line_data))
 				except:
 					pass
 			else:
@@ -234,8 +189,8 @@ class NetVideoStream:
 		if self.img_Q.qsize() == 0:
 			return None
 		frame = self.img_Q.get()
-		# 接收端拥塞控制
 		if self.img_Q.qsize() > self.packer.frame_limit: # self.queue_size*0.1
+			# print("exeed limit")
 			self.img_Q = Queue()
 			if self.img_Q.mutex:
 				self.img_Q.queue.clear()
@@ -244,42 +199,33 @@ class NetVideoStream:
 	def read_show(self):
 		nvs = self.start()
 		last_frame_time = time.time()
-		tshow, fshow = 0, 0
+		tshow = 0
 		while True:
+			# print("reading img")
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
 
-			now = time.time()
+			# now = time.time()
 			frame = self.read_img()
 			if frame is not None:
-				# frame = framePack.frame
-				# frame_time = framePack.ctime
-
-				# 更新和显示fps
 				cnow = int(time.time()*1000)
-				if now - last_frame_time > 0:
-					nvs.receive_fps = int(1.0/(now - last_frame_time))
 				if cnow - nvs.delay_timer > 200:
 					nvs.delay_timer = cnow
 					tshow = nvs.time_delay
-					fshow = nvs.receive_fps
-				
-				# 记录上一帧时间
-				last_frame_time = time.time()
-				
 				font                   = cv2.FONT_HERSHEY_SIMPLEX
 				bottomLeftCornerOfText = (10,50)
 				fontScale              = 1
 				fontColor              = (0,0,255)
 				lineType               = 2
-				cv2.putText(frame, 'Get Fire! Recieve Delay: ' + str(tshow).ljust(3) + " ms, FPS:" + str(fshow).ljust(3),
+				cv2.putText(frame, 'Get Fire! Recieve Delay: ' + str(tshow).ljust(3) + " ms",
 					bottomLeftCornerOfText, 
 					font, 
 					fontScale,
 					fontColor,
 					lineType)
 				cv2.imshow("Receive server", frame)
-				
+				last_frame_time = int(time.time()*1000)
+			# print("piece show time is:", (now - last_frame_time))
 
 	def running(self):
 		return self.more() or not self.stopped
@@ -305,7 +251,30 @@ def ReceiveVideo():
 	t = 0
 	if t==0:
 		NetVideoStream().read_show() # 一次性使用
-	elif t==1:
+
+		print("unex")
+		# 下面的不会执行
+		nvs = NetVideoStream().start()
+		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
+		cnt = 0
+		while nvs.more():
+			cnt += 1
+			pack = nvs.read()
+			if pack is not None:
+				idx = pack.idx
+				data = pack.frame
+				row_start = idx*nvs.packer.piece_size
+				row_end = (idx+1)*nvs.packer.piece_size
+				frame[row_start:row_end] = data
+				# print(data)
+				if cnt == nvs.packer.frame_pieces:
+					cv2.imshow("FireStreamer", frame.reshape(nvs.packer.h, nvs.packer.w, nvs.packer.d))
+					cnt = 0
+				nvs.require = True
+
+			if cv2.waitKey(1) & 0xFF == ord('q'):
+				break
+	else:
 		con = Config()
 		host = con.get("server", "host")
 		port = con.get("server", "port")
@@ -329,29 +298,27 @@ def ReceiveVideo():
 		  
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
-	else:
-		print("unex")
-		# 下面的不会执行
-		nvs = NetVideoStream().start()
-		frame = numpy.zeros(nvs.packer.frame_size_3d, dtype=numpy.uint8)
-		cnt = 0
-		while nvs.more():
-			cnt += 1
-			pack = nvs.read()
-			if pack is not None:
-				idx = pack.idx
-				data = pack.frame
-				row_start = idx*nvs.packer.piece_size
-				row_end = (idx+1)*nvs.packer.piece_size
-				frame[row_start:row_end] = data
-				# print(data)
-				if cnt == nvs.packer.frame_pieces:
-					cv2.imshow("FireStreamer", frame.reshape(nvs.packer.h, nvs.packer.w, nvs.packer.d))
-					cnt = 0
-				nvs.require = True
-
-			if cv2.waitKey(1) & 0xFF == ord('q'):
-				break
+		"""
+		length = recvall(16)#获得图片文件的长度,16代表获取长度
+		stringData = recvall(int(length))#根据获得的文件长度，获取图片文件
+		data = numpy.frombuffer(stringData, numpy.uint8)#将获取到的字符流数据转换成1维数组
+		decimg=cv2.imdecode(data,cv2.IMREAD_COLOR)#将数组解码成图像
+		cv2.imshow('SERVER',decimg)#显示图像
+		
+		#进行下一步处理
+		#。
+		#。
+		#。
+ 
+        #将帧率信息回传，主要目的是测试可以双向通信
+		end = time.time()
+		seconds = end - start
+		fps  = 1/seconds;
+		s.sendto(bytes(str(int(fps)),encoding='utf-8'), address)
+		k = cv2.waitKey(10)&0xff
+		if k == 27:
+			break
+		"""
 	print("The server is quitting. ")
 	cv2.destroyAllWindows()
  
